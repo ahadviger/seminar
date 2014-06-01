@@ -125,7 +125,7 @@ int main( void ) {
 	int *h_dist = (int*) malloc((numberOfNodes) * sizeof(int));
 	cudaMemcpy(h_dist, d_dist, numberOfNodes * sizeof(int), cudaMemcpyDeviceToHost);
 	
-	FILE *out = fopen("results_par.txt", "w");
+	FILE *out = fopen("results_par_2.txt", "w");
 	
 	for( int i = 0; i < numberOfNodes; ++i) {
 		fprintf(out, "%d\n", h_dist[i]);
