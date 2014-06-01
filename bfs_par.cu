@@ -42,15 +42,15 @@ int main( void ) {
 	scanf("%d", &startingNode);
 	
 	int *h_C = (int*) malloc(numberOfEdges * sizeof(int)) ;
-    int *h_R = (int*) malloc((numberOfNodes + 1) * sizeof(int));
+	int *h_R = (int*) malloc((numberOfNodes + 1) * sizeof(int));
 	
 	for(int i = 0; i < numberOfEdges; ++i) {
-        scanf("%d", &h_C[i] );
-    }
+		scanf("%d", &h_C[i] );
+	}
 
-    for(int i = 0; i < numberOfNodes + 1; ++i) {
-        scanf("%d", &h_R[i]);
-    }
+	for(int i = 0; i < numberOfNodes + 1; ++i) {
+		scanf("%d", &h_R[i]);
+	}
 	
 	int numberOfBlocks;
 	int threadsPerBlock;
@@ -98,7 +98,7 @@ int main( void ) {
 	clock_t endTime = clock();
 	printf("Graph input time: %lf\n",  (double)(initStartTime - inputStartTime) / CLOCKS_PER_SEC);
 	printf("Initialization time: %lf\n",  (double)(startTime - initStartTime) / CLOCKS_PER_SEC);
-    printf("Execution time: %lf\n", (double)(endTime - startTime) / CLOCKS_PER_SEC);
+	printf("Execution time: %lf\n", (double)(endTime - startTime) / CLOCKS_PER_SEC);
 	
 	int *h_dist = (int*) malloc((numberOfNodes) * sizeof(int));
 	cudaMemcpy(h_dist, d_dist, numberOfNodes * sizeof(int), cudaMemcpyDeviceToHost);

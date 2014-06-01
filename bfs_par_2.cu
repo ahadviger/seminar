@@ -11,9 +11,7 @@ __global__ void kernel(int *C, int *R, int *dist, int *inQueue, int *outQueue, i
 	if(threadID >= inQueueSize) return;
 	
 	int curr = inQueue[threadID];
-	
-	//printf("%d\n", curr);
-	
+		
 	for(int i = R[curr]; i < R[curr+1]; ++i) {
 		int next = C[i];
 		if(dist[next] == -1) {
@@ -46,15 +44,15 @@ int main( void ) {
 	scanf("%d", &startingNode);
 	
 	int *h_C = (int*) malloc(numberOfEdges * sizeof(int)) ;
-    int *h_R = (int*) malloc((numberOfNodes + 1) * sizeof(int));
+	int *h_R = (int*) malloc((numberOfNodes + 1) * sizeof(int));
 	
 	for(int i = 0; i < numberOfEdges; ++i) {
-        scanf("%d", &h_C[i] );
-    }
+		scanf("%d", &h_C[i] );
+	}
 
-    for(int i = 0; i < numberOfNodes + 1; ++i) {
-        scanf("%d", &h_R[i]);
-    }
+	for(int i = 0; i < numberOfNodes + 1; ++i) {
+		scanf("%d", &h_R[i]);
+	}
 	
 	int numberOfBlocks;
 	int threadsPerBlock;

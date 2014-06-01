@@ -11,7 +11,7 @@ queue< int > Q;
 
 int main( void ) {
 
-	clock_t inputStartTime = clock();
+    clock_t inputStartTime = clock();
 
     scanf("%d%d%d", &V, &E, &start);
 
@@ -33,7 +33,7 @@ int main( void ) {
         dist[i] = -1;
     }
 
-	clock_t startTime = clock();
+    clock_t startTime = clock();
 	
     dist[start] = 0;
     Q.push(start);
@@ -50,8 +50,8 @@ int main( void ) {
     }
 	
     clock_t endTime = clock();
-	printf("Graph input time: %lf\n",  (double)(initStartTime - inputStartTime) / CLOCKS_PER_SEC);
-	printf("Initialization time: %lf\n",  (double)(startTime - initStartTime) / CLOCKS_PER_SEC);
+    printf("Graph input time: %lf\n",  (double)(initStartTime - inputStartTime) / CLOCKS_PER_SEC);
+    printf("Initialization time: %lf\n",  (double)(startTime - initStartTime) / CLOCKS_PER_SEC);
     printf("Execution time: %lf\n", (double)(endTime - startTime) / CLOCKS_PER_SEC);
 
     FILE *out = fopen("results_seq.txt", "w");
