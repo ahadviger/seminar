@@ -27,7 +27,7 @@ int main( void ) {
         scanf("%d", &R[i]);
     }
 
-	clock_t initStartTime = clock();
+    clock_t initStartTime = clock();
 
     for(int i = 0; i < V; ++i) {
         dist[i] = -1;
