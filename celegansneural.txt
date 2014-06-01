@@ -1,4 +1,4 @@
-# Number of nodes, number of edges, starting node
+# Number of nodes | number of edges | starting node | CSR graph representation
 # http://www-personal.umich.edu/~mejn/netdata/celegansneural.zip
 
 297 235 0
