@@ -13,4 +13,4 @@ bfs_par_2: bfs_par_2.cu
 	nvcc bfs_par_2.cu -o bfs_par_2 -arch=sm_20
 
 clean:
-	-rm -f $(PROJECT) $(OBJECTS)
+	-rm -f $(PROJECT)
