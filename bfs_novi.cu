@@ -10,12 +10,15 @@
 #define W_SIZE 32
 #define INF 100000
 #define WARPS 32
-#define TILE_SIZE 1024
+#define TILE_SIZE 256
 #define CTA_THRESHOLD 1023
+#define WARP_THRESHOLD 0
+#define LABEL_SIZE 32
 
- #define NUM_BANKS 16  
- #define LOG_NUM_BANKS 4  
- #define CONFLICT_FREE_OFFSET(n) ((n) >> NUM_BANKS + (n) >> (2 * LOG_NUM_BANKS))  
+#define NUM_BANKS 16  
+#define LOG_NUM_BANKS 4
+#define CONFLICT_FREE_OFFSET(n) ((n) >> NUM_BANKS + (n) >> (2 * LOG_NUM_BANKS))
+ 
 /*
 __device__ int warpCull(int neighbor) {
 	volatile __shared__ int scratch[WARPS][128];
@@ -31,27 +34,9 @@ __device__ int warpCull(int neighbor) {
 	return 0;
 }
 
-__device__ int historyCull(int neighbor) {
-	
-}
-
-/* Threads in a warp together copy their part of array - for INT
- *	- W_OFF - position of a thread in a warp (warp offset)
- *	- size	- size of array to be copied
- */
- /*
-__device_ void memcpy_SIMD_int(int W_OFF, int size, int *dest, int *src) {
-	for(int i = W_OFF, i < size; i += W_SIZE) {
-		dest[i] = src[i];
-	}
-	
-	__threadfence_block();
-}
 */
 
-
-
-__device__ void prefix_sum(int *g_odata, int *g_idata, int n) {
+__device__ void prescan2(int *g_odata, int *g_idata, int n) {
 
 	__shared__ int temp[BLOCK_SIZE]; 
 	int thid = threadIdx.x;  
@@ -61,26 +46,30 @@ __device__ void prefix_sum(int *g_odata, int *g_idata, int n) {
     int bi = thid + (n/2); 
 	
     int bankOffsetA = CONFLICT_FREE_OFFSET(ai);  
-    int bankOffsetB = CONFLICT_FREE_OFFSET(bi);  
-    temp[ai + bankOffsetA] = g_idata[ai];  
-    temp[bi + bankOffsetB] = g_idata[bi];
-	for (int d = n>>1; d > 0; d >>= 1) {                   // build sum in place up the tree  
+    int bankOffsetB = CONFLICT_FREE_OFFSET(bi);
+	
+	if(thid < BLOCK_SIZE / 2) {
+		temp[ai + bankOffsetA] = g_idata[ai];  
+		temp[bi + bankOffsetB] = g_idata[bi];
+	}
+	
+	for (int d = n >> 1; d > 0; d >>= 1) {  
 		__syncthreads();  
 		if (thid < d) {         
 			int ai = offset*(2*thid+1)-1;  
 			int bi = offset*(2*thid+2)-1;  
 			ai += CONFLICT_FREE_OFFSET(ai);  
 			bi += CONFLICT_FREE_OFFSET(bi);
-		   temp[bi] += temp[ai];  
+			temp[bi] += temp[ai];  
 		}  
 		offset *= 2;  	
-	
 	}
+	
 	if(thid == 0) {
 		temp[n - 1 + CONFLICT_FREE_OFFSET(n - 1)] = 0;
 	}  
 	
-	for (int d = 1; d < n; d *= 2) {// traverse down tree & build scan  
+	for (int d = 1; d < n; d *= 2) {  
 		offset >>= 1;  
 		__syncthreads();  
 		if (thid < d) {
@@ -94,20 +83,23 @@ __device__ void prefix_sum(int *g_odata, int *g_idata, int n) {
 		}  
 	}  
 	__syncthreads();
-
-	g_odata[ai] = temp[ai + bankOffsetA];  
-	g_odata[bi] = temp[bi + bankOffsetB];  
-
+	
+	if(thid < BLOCK_SIZE / 2) {
+		g_odata[ai] = temp[ai + bankOffsetA];  
+		g_odata[bi] = temp[bi + bankOffsetB];  
+	}
 }
 
 __device__ void prescan(int *g_odata, int *g_idata, int n)  {  
-    __shared__ int temp[BLOCK_SIZE * 2];
-    int thid = threadIdx.x;  
+    __shared__ int temp[BLOCK_SIZE];
+	int thid = threadIdx.x;  
     int offset = 1;  
 
-    temp[2*thid] = g_idata[2*thid];   
-    temp[2*thid+1] = g_idata[2*thid+1];  
-  	
+    if(thid < BLOCK_SIZE/2) {
+		temp[2*thid] = g_idata[2*thid];   
+		temp[2*thid+1] = g_idata[2*thid+1];  
+	}
+	
     for (int d = n>>1; d > 0; d >>= 1) {   
 		__syncthreads();  
 		if (thid < d) {  
@@ -133,17 +125,25 @@ __device__ void prescan(int *g_odata, int *g_idata, int n)  {
 			temp[bi] += t;   
          }  
     }  
-     __syncthreads();  
-	
-    g_odata[2*thid] = temp[2*thid];
-    g_odata[2*thid+1] = temp[2*thid+1];  
 
+	__syncthreads();  
+
+	if(thid < BLOCK_SIZE/2) {
+		g_odata[2*thid] = temp[2*thid]; 
+		g_odata[2*thid+1] = temp[2*thid+1];  
+	}
 }  
+
+/*
+__device__ void checkIfVisited(int node) {
+	int index = node / LABEL_SIZE;
+	unsigned int label = tex1Dfetch(tex_label, index);
+	boolean visited = label & (1 << node % LABEL_SIZE) != 0;
+	return visited;
+}*/
 	
-__device__ void gatherWarp(int *queue, int *out_queue, int queue_size, int level, int *dist, int *offset, int *d_R, int *d_C) {
+__device__ void gatherWarp(int *queue, int *out_queue, int queue_size, int level, int *dist, int *offset, int *d_R, int *d_C, int *scan_input, int *scan_output) {
 	volatile __shared__ int comm[WARPS][3];
-	__shared__ int scan_input[BLOCK_SIZE * 2];
-	__shared__ int scan_output[BLOCK_SIZE * 2];
 
 	int lane_id = threadIdx.x % W_SIZE;
 	int warp_id = threadIdx.x / W_SIZE;
@@ -152,6 +152,7 @@ __device__ void gatherWarp(int *queue, int *out_queue, int queue_size, int level
 	int node = 0, r = 0, r_end = 0;
 	__shared__ int done;
 	__shared__ int cta_offset;
+	__shared__ int curr_node;
 	
 	if(threadIdx.x < queue_size) {
 		node = queue[id];
@@ -164,7 +165,7 @@ __device__ void gatherWarp(int *queue, int *out_queue, int queue_size, int level
 		if(id == 0) done = 1;
 		__syncthreads();
 		
-		if(r_end - r > 0) {
+		if(r_end - r > WARP_THRESHOLD) {
 			comm[warp_id][0] = lane_id;
 			done = 0;
 		}
@@ -176,6 +177,7 @@ __device__ void gatherWarp(int *queue, int *out_queue, int queue_size, int level
 			comm[warp_id][1] = r;
 			comm[warp_id][2] = r_end;
 			r = r_end;
+			curr_node = node;
 		}
 		
 		int r_gather = comm[warp_id][1] + lane_id;
@@ -192,6 +194,7 @@ __device__ void gatherWarp(int *queue, int *out_queue, int queue_size, int level
 			if(r_gather < r_gather_end) {
 				cycle_done = 0;
 				neighbor = d_C[r_gather];
+				//atomicAdd(&d_R[curr_node], 1);
 				if(dist[neighbor] == -1) {
 					dist[neighbor] = level;
 					scan_input[id] = 1;
@@ -201,10 +204,7 @@ __device__ void gatherWarp(int *queue, int *out_queue, int queue_size, int level
 			__syncthreads();
 			if(cycle_done == 1) break;
 			
-			if(threadIdx.x < BLOCK_SIZE) {
-				prescan(scan_output, scan_input, BLOCK_SIZE);
-			}
-			
+			prescan(scan_output, scan_input, BLOCK_SIZE);			
 			__syncthreads();
 			
 			if(threadIdx.x == 0) {
@@ -218,14 +218,16 @@ __device__ void gatherWarp(int *queue, int *out_queue, int queue_size, int level
 			}
 			
 			r_gather += W_SIZE;
+
+			//if(r_gather_end - (r_gather - id) < WARP_THRESHOLD) break;
 		}
+		
+		//if(lane_id == 0) d_R[curr_node] = r_gather_end - WARP_THRESHOLD - 1;
 	}
 }
 
-__device__ void gatherCTA(int *queue, int *out_queue, int queue_size, int level, int *dist, int *offset, int *d_R, int *d_C) {
+__device__ void gatherCTA(int *queue, int *out_queue, int queue_size, int level, int *dist, int *offset, int *d_R, int *d_C, int *scan_input, int *scan_output) {
 	volatile __shared__ int comm[3];
-	__shared__ int scan_input[BLOCK_SIZE * 2];
-	__shared__ int scan_output[BLOCK_SIZE * 2];
 	__shared__ int curr_node;
 	
 	int id = threadIdx.x;
@@ -267,16 +269,12 @@ __device__ void gatherCTA(int *queue, int *out_queue, int queue_size, int level,
 		__shared__ int done;
 		volatile int neighbor;
 
-		int i;
-		for(i = 1; true; ++i) {
-	
-			if(id == 0) done = 1;
-			__syncthreads();
+		while(true) {
 			
 			scan_input[id] = 0;
 			
-			if(r_gather_end - r_gather > CTA_THRESHOLD) {
-				done = 0;
+			if(r_gather_end - r_gather > 0) {
+			//	done = 0;
 				neighbor = d_C[r_gather];
 				if(dist[neighbor] == -1) {
 					dist[neighbor] = level;
@@ -284,14 +282,8 @@ __device__ void gatherCTA(int *queue, int *out_queue, int queue_size, int level,
 				}
 			}
 			__syncthreads();
-
-			if(done == 1) break;
 			
-			if(threadIdx.x < BLOCK_SIZE) {
-				prescan(scan_output, scan_input, BLOCK_SIZE);
-			}
-			
-			__syncthreads();
+			prescan(scan_output, scan_input, BLOCK_SIZE);			__syncthreads();
 			
 			if(threadIdx.x == 0) {
 				cta_offset = atomicAdd(offset, scan_output[BLOCK_SIZE-1] + scan_input[BLOCK_SIZE-1]);
@@ -304,50 +296,122 @@ __device__ void gatherCTA(int *queue, int *out_queue, int queue_size, int level,
 			}
 
 			r_gather += BLOCK_SIZE;
+			
+			if(r_gather_end - (r_gather - id) < CTA_THRESHOLD) break;
 		}
 		
-		if(threadIdx.x == 0) atomicAdd(&d_R[curr_node], BLOCK_SIZE * i);
+		if(threadIdx.x == 0) d_R[curr_node] = r_gather_end - CTA_THRESHOLD - 1;
 	}
 }
 
+__device__ void gatherScan(int *queue, int *out_queue, int queue_size, int level, int *dist, int *offset, int *d_R, int *d_C, int *scan_input, int *scan_output) {
+
+	volatile __shared__ int comm[BLOCK_SIZE];
+	__shared__ int cta_offset;
+
+	int id = threadIdx.x;
+	int node = 0, r = 0, r_end = 0;
+	
+	if(threadIdx.x < queue_size) {
+		node = queue[id];
+		r = d_R[node];
+		r_end = d_R[node + 1];
+	}
+	
+	scan_input[id] = r_end - r;
+
+	__syncthreads();
+	prescan(scan_output, scan_input, BLOCK_SIZE);
+	__syncthreads();
+
+	int rsv_rank = scan_output[id];
+	
+	
+	int total = scan_output[BLOCK_SIZE-1] + scan_input[BLOCK_SIZE-1];
+	int cta_progress = 0;
+	volatile int neighbor;
+	
+	while(total - cta_progress > 0) {
+	
+		while(rsv_rank < cta_progress + BLOCK_SIZE && r < r_end) {
+			comm[rsv_rank - cta_progress] = r;
+			rsv_rank++;
+			r++;
+		}
+	
+		__syncthreads();
+		
+		int min = BLOCK_SIZE;
+		if(total - cta_progress < BLOCK_SIZE)
+			min = total - cta_progress;
+			
+		scan_input[id] = 0;
+		if(id < min) {
+			neighbor = d_C[comm[id]];
+			if(dist[neighbor] == -1) {
+				dist[neighbor] = level;
+				scan_input[id] = 1;
+			}
+		}
+		
+		__syncthreads();
+
+		prescan(scan_output, scan_input, BLOCK_SIZE);		
+		__syncthreads();
+			
+		if(threadIdx.x == 0) {
+			cta_offset = atomicAdd(offset, scan_output[BLOCK_SIZE-1] + scan_input[BLOCK_SIZE-1]);
+		}
+
+		__syncthreads();
+
+		if(scan_input[id] == 1) {
+			out_queue[scan_output[id] + cta_offset] = neighbor;
+		}
+		
+		cta_progress += BLOCK_SIZE;
+		__syncthreads();
+	}
+}
 
 __global__ void BFS(int *d_R, int *d_C, int numberOfNodes, int *queue, int *out_queue, int *d_dist, int *offset, int level) {
 	
 	__shared__ int neighbors[TILE_SIZE];
+	__shared__ int scan_input[BLOCK_SIZE];
+	__shared__ int scan_output[BLOCK_SIZE];
+
 	int chunk_size = min(TILE_SIZE, numberOfNodes - TILE_SIZE * blockIdx.x);
-	
-	//if(threadIdx.x==0) printf("%d %d %d\n", blockIdx.x, level, chunk_size);
 
 	if(threadIdx.x < chunk_size) {
 		neighbors[threadIdx.x] = queue[blockIdx.x * TILE_SIZE + threadIdx.x];
-	//	printf("tadadam %d %d %d --> %d\n", blockIdx.x, threadIdx.x, level, neighbors[threadIdx.x]);
 	}
-	//if(threadIdx.x==0) printf("chunk %d %d %d\n", level, blockIdx.x, chunk_size);
-	__syncthreads();
-	gatherCTA(neighbors, out_queue, chunk_size, level, d_dist, offset, d_R, d_C);
-	__syncthreads();
 
-	gatherWarp(neighbors, out_queue, chunk_size, level, d_dist, offset, d_R, d_C);
-	
-//	if(threadIdx.x==0) printf("gotovo %d %d\n", blockIdx.x, level);
+	__syncthreads();
+	gatherCTA(neighbors, out_queue, chunk_size, level, d_dist, offset, d_R, d_C, scan_input, scan_output);
+	__syncthreads();
+//	gatherWarp(neighbors, out_queue, chunk_size, level, d_dist, offset, d_R, d_C, scan_input, scan_output);
+//	__syncthreads();
+	gatherScan(neighbors, out_queue, chunk_size, level, d_dist, offset, d_R, d_C, scan_input, scan_output);
 
 }
 
 ///////////////////////////////////////////////////
-//	MAIN PROGRAM
+//					MAIN PROGRAM
 ///////////////////////////////////////////////////
 
-int main(void) {
+int main(int argc, char** argv) {
 
 	const int ZERO = 0;
 
 	int numberOfNodes;
 	int numberOfEdges;
 	int startingNode;
+	
+	FILE *input = fopen(argv[1], "r");
 		
-	scanf("%d", &numberOfNodes);
-	scanf("%d", &numberOfEdges);
-	scanf("%d", &startingNode);
+	fscanf(input, "%d", &numberOfNodes);
+	fscanf(input, "%d", &numberOfEdges);
+	fscanf(input, "%d", &startingNode);
 	
 	int *h_C = (int*) malloc(numberOfEdges * sizeof(int)) ;
 	int *h_R = (int*) malloc((numberOfNodes + 1) * sizeof(int));
@@ -355,11 +419,11 @@ int main(void) {
 	int *h_q2 = (int*) malloc(numberOfNodes * 3 * sizeof(int));
 
 	for(int i = 0; i < numberOfEdges; ++i) {
-		scanf("%d", &h_C[i] );
+		fscanf(input, "%d", &h_C[i] );
 	}
 
 	for(int i = 0; i < numberOfNodes + 1; ++i) {
-		scanf("%d", &h_R[i]);
+		fscanf(input, "%d", &h_R[i]);
 		if(i < numberOfNodes) {
 			h_dist[i] = (i == startingNode) ? 0 : -1;
 		}
@@ -399,7 +463,7 @@ int main(void) {
 	
 	clock_t startTime = clock();
 	
-	for(int level = 1;; ++level) {
+	for(int level = 1;;	 ++level) {
 
 		int queueSize;
 		
@@ -417,23 +481,11 @@ int main(void) {
 		
 		int numberOfBlocks = (int)ceil((double)queueSize / (double)TILE_SIZE);
 		
-		//printf("size %d blocks %d\n", queueSize, numberOfBlocks);
-
-
 		BFS<<<numberOfBlocks, BLOCK_SIZE>>>(d_R, d_C, queueSize, d_q1, d_q2, d_dist, offset, level);
 
 		cudaThreadSynchronize();
 		cudaMemcpy(&queueSize, offset, sizeof(int), cudaMemcpyDeviceToHost);
-		
-	//	int h_broj;
-	//	cudaMemcpy(&h_broj, broj, sizeof(int), cudaMemcpyDeviceToHost);
-	//	printf("\nvelicine %d %d %d\n", level, h_broj, queueSize);
-		
-	//	cudaMemcpy(h_q2, d_q2, queueSize * sizeof(int), cudaMemcpyDeviceToHost);
-	//	printf("\n---------------\n");
-	//	for(int j = 0; j < queueSize; ++j) printf("%d x ", h_q2[j]);
-	//	printf("\n---------------\n");
-	//	fflush(stdout);
+
 		int *tmp = d_q1;
 		d_q1 = d_q2;
 		d_q2 = tmp;
@@ -461,6 +513,8 @@ int main(void) {
 	free(h_C);
 	free(h_R);
 	free(h_dist);
+	fclose(input);
+	cudaDeviceReset();
 	
 	return 0;
 }
