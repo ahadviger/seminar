@@ -17,7 +17,7 @@ Rezultati se nalaze u datoteci rezultati.pdf.
   - parametri se unose preko standardnog ulaza (bfs_par < input_file.txt)
   - izlaz se ispisuje u datoteku results_par.txt, odnosno results_par_2.txt
 
- 3. Pokušaj unaprijeđenja paralelne CUDA implementacije BFS-a
-	- nvcc bfs_novi.cu -arch=sm_20 -o bfs_par_3
-	- ulazna datoteka unosi se kao argument iz komandne linije
-	- izlaz se ispisuje u datoteku results_par.txt
+3. Pokušaj unaprijeđenja paralelne CUDA implementacije BFS-a
+  - nvcc bfs_novi.cu -arch=sm_20 -o bfs_par_3
+  - ulazna datoteka unosi se kao argument iz komandne linije
+  - izlaz se ispisuje u datoteku results_par.txt
